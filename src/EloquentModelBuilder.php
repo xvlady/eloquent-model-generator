@@ -1,7 +1,5 @@
 <?php
-
-namespace Krlove\EloquentModelGenerator;
-
+namespace xvlady\EloquentModelGenerator;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Table;
 use Illuminate\Config\Repository as AppConfig;
@@ -10,16 +8,15 @@ use Krlove\CodeGenerator\Model\DocBlockModel;
 use Krlove\CodeGenerator\Model\NamespaceModel;
 use Krlove\CodeGenerator\Model\PropertyModel;
 use Krlove\CodeGenerator\Model\VirtualPropertyModel;
-use Krlove\EloquentModelGenerator\Exception\GeneratorException;
-use Krlove\EloquentModelGenerator\Model\BelongsTo;
-use Krlove\EloquentModelGenerator\Model\BelongsToMany;
-use Krlove\EloquentModelGenerator\Model\EloquentModel;
-use Krlove\EloquentModelGenerator\Model\HasMany;
-use Krlove\EloquentModelGenerator\Model\HasOne;
-
+use xvlady\EloquentModelGenerator\Exception\GeneratorException;
+use xvlady\EloquentModelGenerator\Model\BelongsTo;
+use xvlady\EloquentModelGenerator\Model\BelongsToMany;
+use xvlady\EloquentModelGenerator\Model\EloquentModel;
+use xvlady\EloquentModelGenerator\Model\HasMany;
+use xvlady\EloquentModelGenerator\Model\HasOne;
 /**
  * Class EloquentModelBuilder
- * @package Krlove\EloquentModelGenerator
+ * @package xvlady\EloquentModelGenerator
  */
 class EloquentModelBuilder
 {
@@ -47,17 +44,20 @@ class EloquentModelBuilder
         'float'        => 'float',
         'guid'         => 'string',
     ];
-
     /**
      * @var AbstractSchemaManager
      */
     protected $manager;
-
     /**
      * @var AppConfig
      */
     protected $appConfig;
-
+    /**
+     * The table prefix.
+     *
+     * @var string
+     */
+    protected $tablePrefix = '';
     /**
      * Builder constructor.
      * @param DatabaseManager $databaseManager
@@ -65,12 +65,11 @@ class EloquentModelBuilder
      */
     public function __construct(DatabaseManager $databaseManager, AppConfig $appConfig)
     {
-        $this->manager   = $databaseManager->connection()->getDoctrineSchemaManager();
-        $this->appConfig = $appConfig;
-
+        $this->manager     = $databaseManager->connection()->getDoctrineSchemaManager();
+        $this->appConfig   = $appConfig;
+        $this->tablePrefix = $databaseManager->connection()-getTablePrefix();
         $this->registerUserTypes();
     }
-
     /**
      * @param string $type
      * @param string $value
@@ -80,7 +79,6 @@ class EloquentModelBuilder
         $this->types[$type] = $value;
         $this->manager->getDatabasePlatform()->registerDoctrineTypeMapping($type, $value);
     }
-
     /**
      * @param Config $config
      * @return EloquentModel
@@ -93,19 +91,15 @@ class EloquentModelBuilder
             $config->get('base_class_name'),
             $config->get('table_name')
         );
-
-        if (!$this->manager->tablesExist($model->getTableName())) {
-            throw new GeneratorException(sprintf('Table %s does not exist', $model->getTableName()));
+        if (!$this->manager->tablesExist($this->tablePrefix.$model->getTableName())) {
+            throw new GeneratorException(sprintf('Table %s does not exist', $this->tablePrefix.$model->getTableName()));
         }
-
         $this->setNamespace($model, $config)
             ->setCustomProperties($model, $config)
             ->setFields($model)
             ->setRelations($model);
-
         return $model;
     }
-
     /**
      * Register types defined in application config
      */
@@ -118,7 +112,6 @@ class EloquentModelBuilder
             }
         }
     }
-
     /**
      * @param EloquentModel $model
      * @param Config $config
@@ -128,10 +121,8 @@ class EloquentModelBuilder
     {
         $namespace = $config->get('namespace');
         $model->setNamespace(new NamespaceModel($namespace));
-
         return $this;
     }
-
     /**
      * @param EloquentModel $model
      * @param Config $config
@@ -146,7 +137,6 @@ class EloquentModelBuilder
             );
             $model->addProperty($pNoTimestamps);
         }
-
         if ($config->has('date_format')) {
             $pDateFormat = new PropertyModel('dateFormat', 'protected', $config->get('date_format'));
             $pDateFormat->setDocBlock(
@@ -154,7 +144,6 @@ class EloquentModelBuilder
             );
             $model->addProperty($pDateFormat);
         }
-
         if ($config->has('connection')) {
             $pConnection = new PropertyModel('connection', 'protected', $config->get('connection'));
             $pConnection->setDocBlock(
@@ -162,10 +151,8 @@ class EloquentModelBuilder
             );
             $model->addProperty($pConnection);
         }
-
         return $this;
     }
-
     /**
      * @param EloquentModel $model
      * @return $this
@@ -174,98 +161,89 @@ class EloquentModelBuilder
     {
         $tableDetails       = $this->manager->listTableDetails($model->getTableName());
         $primaryColumnNames = $tableDetails->getPrimaryKey()->getColumns();
-
         $columnNames = [];
         foreach ($tableDetails->getColumns() as $column) {
             $model->addProperty(new VirtualPropertyModel(
                 $column->getName(),
                 $this->resolveType($column->getType()->getName())
             ));
-
             if (!in_array($column->getName(), $primaryColumnNames)) {
                 $columnNames[] = $column->getName();
             }
         }
-
         $fillableProperty = new PropertyModel('fillable');
         $fillableProperty->setAccess('protected')
             ->setValue($columnNames)
             ->setDocBlock(new DocBlockModel('@var array'));
         $model->addProperty($fillableProperty);
-
         return $this;
     }
-
+    protected cropPrefix($value){
+        return substr($value,strlen($this->tablePrefix));
+    }
+    protected addPrefix($value){
+        return $this->tablePrefix.$value;
+    }
     /**
      * @param EloquentModel $model
      * @return $this
      */
     protected function setRelations(EloquentModel $model)
     {
-        $foreignKeys = $this->manager->listTableForeignKeys($model->getTableName());
+        $foreignKeys = $this->manager->listTableForeignKeys($this->addPrefix($model->getTableName()));
         foreach ($foreignKeys as $tableForeignKey) {
             $tableForeignColumns = $tableForeignKey->getForeignColumns();
             if (count($tableForeignColumns) !== 1) {
                 continue;
             }
-
             $relation = new BelongsTo(
-                $tableForeignKey->getForeignTableName(),
+                $this->cropPrefix($tableForeignKey->getForeignTableName()),
                 $tableForeignKey->getLocalColumns()[0],
                 $tableForeignColumns[0]
             );
             $model->addRelation($relation);
         }
-
         $tables = $this->manager->listTables();
         foreach ($tables as $table) {
-            if ($table->getName() === $model->getTableName()) {
+            if ($table->getName() === $this->addPrefix($model->getTableName())) {
                 continue;
             }
-
             $foreignKeys = $table->getForeignKeys();
             foreach ($foreignKeys as $name => $foreignKey) {
-                if ($foreignKey->getForeignTableName() === $model->getTableName()) {
+                if ($foreignKey->getForeignTableName() === $this->addPrefix($model->getTableName())) {
                     $localColumns = $foreignKey->getLocalColumns();
                     if (count($localColumns) !== 1) {
                         continue;
                     }
-
-                    if (count($foreignKeys) === 2 && count($table->getColumns()) === 2) {
+                    if (count($foreignKeys) === 2 && count($table->getColumns()) >= 2) {
                         $keys               = array_keys($foreignKeys);
                         $key                = array_search($name, $keys) === 0 ? 1 : 0;
                         $secondForeignKey   = $foreignKeys[$keys[$key]];
                         $secondForeignTable = $secondForeignKey->getForeignTableName();
-
                         $relation = new BelongsToMany(
-                            $secondForeignTable,
+                            $this->cropPrefix($secondForeignTable),
                             $table->getName(),
                             $localColumns[0],
                             $secondForeignKey->getLocalColumns()[0]
                         );
                         $model->addRelation($relation);
-
                         break;
                     } else {
-                        $tableName     = $foreignKey->getLocalTableName();
+                        $tableName     = $this->cropPrefix($foreignKey->getLocalTableName());
                         $foreignColumn = $localColumns[0];
                         $localColumn   = $foreignKey->getForeignColumns()[0];
-
                         if ($this->isColumnUnique($table, $foreignColumn)) {
                             $relation = new HasOne($tableName, $foreignColumn, $localColumn);
                         } else {
                             $relation = new HasMany($tableName, $foreignColumn, $localColumn);
                         }
-
                         $model->addRelation($relation);
                     }
                 }
             }
         }
-
         return $this;
     }
-
     /**
      * @param Table $table
      * @param string $column
@@ -283,10 +261,8 @@ class EloquentModelBuilder
                 return true;
             }
         }
-
         return false;
     }
-
     /**
      * @param string $type
      *
