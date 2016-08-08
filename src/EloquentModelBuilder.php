@@ -203,13 +203,11 @@ class EloquentModelBuilder
         return $this;
     }
 
-    protected cropPrefix($value){
-        var_dump($value);
-
+    protected function cropPrefix($value){
         return substr($value,strlen($this->tablePrefix));
     }
 
-    protected addPrefix($value){
+    protected function addPrefix($value){
         return $this->tablePrefix.$value;
     }
 
