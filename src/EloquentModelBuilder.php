@@ -204,6 +204,8 @@ class EloquentModelBuilder
     }
 
     protected cropPrefix($value){
+        var_dump($value);
+
         return substr($value,strlen($this->tablePrefix));
     }
 
